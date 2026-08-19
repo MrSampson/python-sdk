@@ -32,6 +32,33 @@ DEFAULT_MAX_REQUEST_BODY_SIZE: Final = 4 * 1024 * 1024
 """Default maximum Streamable HTTP request body size in bytes (4 MiB)."""
 
 
+def _session_not_found_response(session_id: str) -> Response:
+    # Both callers below use this identical, self-describing message: a
+    # session can be missing either because it was never valid or because
+    # the credential doesn't match its owner, and the second case must
+    # respond exactly as if the session did not exist (see the credential
+    # check above) -- so the two responses can never diverge without
+    # leaking which case occurred. Same shape as SseServerTransport's
+    # unknown_session_response.
+    body = JSONRPCError(
+        jsonrpc="2.0",
+        id="server-error",
+        error=ErrorData(
+            code=INVALID_REQUEST,
+            message=(
+                f"Could not find session {session_id[:64]}: the server may have restarted since this "
+                "session was created, the session may have expired, or the session_id was never valid. "
+                "Reconnect and send a fresh 'initialize' request to start a new session."
+            ),
+        ),
+    )
+    return Response(
+        body.model_dump_json(by_alias=True, exclude_none=True),
+        status_code=404,
+        media_type="application/json",
+    )
+
+
 class StreamableHTTPSessionManager:
     """
     Manages StreamableHTTP sessions with optional resumability via event store.
@@ -264,14 +291,7 @@ class StreamableHTTPSessionManager:
                     "Rejecting request for session %s: credential does not match the one that created the session",
                     request_mcp_session_id[:64],
                 )
-                body = JSONRPCError(
-                    jsonrpc="2.0", id="server-error", error=ErrorData(code=INVALID_REQUEST, message="Session not found")
-                )
-                response = Response(
-                    body.model_dump_json(by_alias=True, exclude_none=True),
-                    status_code=404,
-                    media_type="application/json",
-                )
+                response = _session_not_found_response(request_mcp_session_id)
                 await response(scope, receive, send)
                 return
             logger.debug("Session already exists, handling request directly")
@@ -354,12 +374,7 @@ class StreamableHTTPSessionManager:
                 await http_transport.handle_request(scope, receive, send)
         else:
             # Unknown or expired session ID - return 404 per MCP spec
-            body = JSONRPCError(
-                jsonrpc="2.0", id="server-error", error=ErrorData(code=INVALID_REQUEST, message="Session not found")
-            )
-            response = Response(
-                body.model_dump_json(by_alias=True, exclude_none=True), status_code=404, media_type="application/json"
-            )
+            response = _session_not_found_response(request_mcp_session_id)
             await response(scope, receive, send)
 
 
