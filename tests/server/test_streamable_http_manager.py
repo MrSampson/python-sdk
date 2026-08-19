@@ -444,6 +444,11 @@ async def test_unknown_session_id_returns_404():
         message = error_data["error"]["message"]
         assert "restart" in message.lower()
         assert "reconnect" in message.lower() and "initialize" in message.lower()
+        # This transport (unlike sse) has a session_idle_timeout, so an
+        # expired session is a real, distinct cause the sse-side wording
+        # doesn't need to name -- assert it's actually covered, not just
+        # copied from the sse message.
+        assert "expire" in message.lower()
 
 
 @pytest.mark.anyio

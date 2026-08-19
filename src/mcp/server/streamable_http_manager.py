@@ -33,13 +33,21 @@ DEFAULT_MAX_REQUEST_BODY_SIZE: Final = 4 * 1024 * 1024
 
 
 def _session_not_found_response(session_id: str) -> Response:
-    # Both callers below use this identical, self-describing message: a
-    # session can be missing either because it was never valid or because
-    # the credential doesn't match its owner, and the second case must
-    # respond exactly as if the session did not exist (see the credential
-    # check above) -- so the two responses can never diverge without
-    # leaking which case occurred. Same shape as SseServerTransport's
-    # unknown_session_response.
+    """Both call sites in ``_handle_stateful_request`` -- the unknown/expired
+    session branch and the credential-mismatch branch -- use this identical,
+    self-describing message: a session can be missing either because it was
+    never valid or because the credential doesn't match its owner, and the
+    second case must respond exactly as if the session did not exist -- so
+    the two responses can never diverge without leaking which case occurred.
+    Same shape as SseServerTransport's unknown_session_response.
+
+    ``session_id`` here is the raw, client-supplied ``mcp-session-id``
+    header value, not one already validated against SESSION_ID_PATTERN (that
+    check only applies to IDs the server itself mints) -- truncated to 64
+    chars to match the file's existing logging convention, and safe to
+    reflect back since it's JSON-escaped by model_dump_json and served as
+    application/json, never sniffed as HTML.
+    """
     body = JSONRPCError(
         jsonrpc="2.0",
         id="server-error",
